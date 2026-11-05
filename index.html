@@ -1545,4 +1545,16 @@ create policy "Allow update for all" on public.nac_units for update using (true)
   <script>(function(){function m(a){var h=a.getAttribute("href");if(!h)return;try{var u=new URL(h,document.baseURI);if(((u.protocol==="http:"||u.protocol==="https:")&&u.host!==location.host)||u.protocol==="mailto:"||u.protocol==="tel:"||u.protocol==="sms:"){a.target="_blank";a.rel="noopener noreferrer";}}catch(e){}}function s(){document.querySelectorAll("a[href]").forEach(m);}if(document.readyState!=="loading"){s();}else{document.addEventListener("DOMContentLoaded",s);}document.addEventListener("click",function(e){var a=e.target&&e.target.closest&&e.target.closest("a[href]");if(a){m(a);}},true);})();</script>
   <script type="application/json" data-clippy-inline-media-manifest="1">{"version":1,"slots":[]}</script>
 </body>
+  <button id="btnDownload" style="position:fixed;bottom:20px;right:20px;z-index:9999;background:white;border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.1);cursor:pointer">⬇ Download Excel</button>
+<script>
+document.getElementById('btnDownload').onclick=()=>{
+  let csv=['UNIT,Komponen,Asersi,Verifikasi,Selisih,Auditor'];
+  document.querySelectorAll('table tbody tr').forEach(tr=>{
+    let tds=[...tr.querySelectorAll('td')].map(td=>`"${td.innerText.replace(/"/g,'""')}"`);
+    if(tds.length) csv.push(tds.join(','));
+  });
+  let blob=new Blob([csv.join('\n')],{type:'text/csv'});
+  let a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='NAC_KertasKerja_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
+}
+</script>
 </html>
