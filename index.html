@@ -1548,12 +1548,19 @@ create policy "Allow update for all" on public.nac_units for update using (true)
   <button id="btnDownload" style="position:fixed;bottom:20px;right:20px;z-index:9999;background:white;border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.1);cursor:pointer">⬇ Download Excel</button>
 <script>
 document.getElementById('btnDownload').onclick=()=>{
-  let csv=['UNIT,Komponen,Asersi,Verifikasi,Selisih,Auditor'];
-  document.querySelectorAll('table tbody tr').forEach(tr=>{
-    let tds=[...tr.querySelectorAll('td')].map(td=>`"${td.innerText.replace(/"/g,'""')}"`);
-    if(tds.length) csv.push(tds.join(','));
+  let tables=[...document.querySelectorAll('table')];
+  let table=tables.find(tb=>tb.querySelector('thead')&&tb.querySelector('thead').innerText.includes('UNIT'))||tables[0];
+  if(!table){alert('Buka tab Kertas Kerja dulu bro, baru download.');return;}
+  let esc=(s)=>'"'+String(s??'').replace(/\r?\n/g,' ').replace(/"/g,'""')+'"';
+  let rows=[];
+  let head=[...table.querySelectorAll('thead th')].map(th=>esc(th.innerText.trim()));
+  if(head.length) rows.push(head.join(';'));
+  table.querySelectorAll('tbody tr').forEach(tr=>{
+    let tds=[...tr.querySelectorAll('td')].map(td=>esc(td.innerText.trim()));
+    if(tds.length) rows.push(tds.join(';'));
   });
-  let blob=new Blob([csv.join('\n')],{type:'text/csv'});
+  if(rows.length<=1){alert('Buka tab Kertas Kerja dulu bro, datanya belum tampil.');return;}
+  let blob=new Blob(['\ufeffsep=;\n'+rows.join('\n')],{type:'text/csv;charset=utf-8;'});
   let a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='NAC_KertasKerja_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
 }
 </script>
