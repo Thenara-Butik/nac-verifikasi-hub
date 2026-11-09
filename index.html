@@ -1603,4 +1603,176 @@ document.getElementById('btnDownload').onclick=()=>{
   });
 })();
 </script>
+<script>
+(function(){
+  if(document.getElementById('btnExportBackup')) return;
+  var wrap=document.createElement('div');
+  wrap.style.cssText='position:fixed;bottom:20px;left:20px;z-index:9999;display:flex;gap:8px;';
+  var mkBtn=function(txt,bg){
+    var b=document.createElement('button');
+    b.textContent=txt;
+    b.style.cssText='background:'+bg+';border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.12);cursor:pointer;';
+    return b;
+  };
+  var exp=mkBtn('⬆ Backup Data','#ffffff');
+  exp.id='btnExportBackup';
+  exp.onclick=function(){
+    var d={};
+    for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); if(k && (k.indexOf('nac_')===0 || k.indexOf('supabase_')===0)) d[k]=localStorage.getItem(k); }
+    var blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});
+    var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download='BACKUP_NAC_'+new Date().toISOString().slice(0,10)+'.json'; a.click();
+    alert('Backup ke-download bro. Kirim file itu ke HP lo (WA / email / kabel).');
+  };
+  var imp=mkBtn('⬇ Import Data','#1e2a3a'); imp.style.color='#fff';
+  imp.id='btnImportBackup';
+  var inp=document.createElement('input'); inp.type='file'; inp.accept='.json,application/json'; inp.style.display='none';
+  inp.onchange=function(){
+    var f=inp.files[0]; if(!f) return;
+    var r=new FileReader();
+    r.onload=function(){
+      try{
+        var d=JSON.parse(r.result);
+        var count=0;
+        for(var k in d){ localStorage.setItem(k, typeof d[k]==='string'? d[k] : JSON.stringify(d[k])); count++; }
+        if(!count){ alert('File backup-nya kosong bro, coba download ulang dari laptop.'); return; }
+        alert('Berhasil import '+count+' data bro. Halaman bakal refresh, angkanya harusnya muncul lagi.');
+        location.reload();
+      }catch(e){ alert('File-nya bukan backup NAC bro, error: '+e.message); }
+    };
+    r.readAsText(f);
+  };
+  imp.onclick=function(){ inp.click(); };
+  wrap.appendChild(exp); wrap.appendChild(imp); wrap.appendChild(inp);
+  document.body.appendChild(wrap);
+})();
+</script>
+<script>
+/* ===== NAC ONLINE SYNC - Supabase =====
+   Tabel: nac_kertas, nac_auditors, nac_assignments
+   Jalankan SQL di Supabase SQL Editor dulu (gue kasih di chat).
+   Cara pakai:
+   - Laptop + HP + Bos isi URL + Anon Key yang SAMA di Setting Supabase
+   - Klik "Upload Online" sekali di laptop buat kirim data lama
+   - Di HP / laptop bos, klik "Download Online" / buka ulang, data muncul
+*/
+(function(){
+  function cfg(){
+    try{
+      var url=(localStorage.getItem('supabase_url')||'').trim();
+      var key=(localStorage.getItem('supabase_anon_key')||'').trim();
+      if(!url||!key||url.indexOf('https://')!==0||key.indexOf('YOUR_')===0) return null;
+      return {url:url.replace(/\/$/,''), key:key};
+    }catch(e){ return null; }
+  }
+  function hdr(c){ return {apikey:c.key, Authorization:'Bearer '+c.key, 'Content-Type':'application/json', Prefer:'resolution=merge-duplicates'}; }
+  function status(msg){
+    var el=document.getElementById('onlineStatus');
+    if(!el){ el=document.createElement('div'); el.id='onlineStatus';
+      el.style.cssText='position:fixed;top:12px;right:12px;z-index:9999;background:#1e2a3a;color:#fff;padding:8px 12px;border-radius:10px;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.25);max-width:320px;';
+      document.body.appendChild(el);
+    }
+    el.textContent=msg; el.style.display='block';
+    clearTimeout(el._t); el._t=setTimeout(function(){ el.style.display='none'; }, 4000);
+  }
+  function getLocal(key, def){ try{ var v=localStorage.getItem(key); return v? JSON.parse(v): def; }catch(e){ return def; } }
+
+  async function upload(){
+    var c=cfg(); if(!c){ alert('Isi dulu Supabase URL + Anon Key di Setting Supabase bro.'); return; }
+    status('Upload ke Online...');
+    try{
+      // 1. Kertas: { "UID Jaya__A": {asersi, verifikasi} }
+      var kertas=getLocal('nac_kertas_final_v1', {});
+      var rows=[];
+      for(var k in kertas){
+        var p=k.split('__'); if(p.length<2) continue;
+        rows.push({id:k, unit:p[0], komponen:p[1], asersi:Number(kertas[k].asersi||0), verifikasi:Number(kertas[k].verifikasi||0)});
+      }
+      if(rows.length){
+        var r1=await fetch(c.url+'/rest/v1/nac_kertas', {method:'POST', headers:hdr(c), body:JSON.stringify(rows)});
+        if(!r1.ok) throw new Error('nac_kertas: '+await r1.text());
+      }
+      // 2. Auditors
+      var auds=getLocal('nac_auditors_final_v1', []);
+      if(auds.length){
+        var r2=await fetch(c.url+'/rest/v1/nac_auditors', {method:'POST', headers:hdr(c), body:JSON.stringify(auds.map(function(a){ return {id:a.id, nama:a.nama||'', nip:a.nip||''}; }))});
+        if(!r2.ok) throw new Error('nac_auditors: '+await r2.text());
+      }
+      // 3. Assignments: {unit, auditorId, tw}
+      var assigns=getLocal('nac_assignments_final_v1', []);
+      if(assigns.length){
+        // hapus dulu biar gak numpuk duplikat lama, lalu insert baru
+        await fetch(c.url+'/rest/v1/nac_assignments?unit=neq.__dummy__', {method:'DELETE', headers:hdr(c)});
+        // Supabase REST butuh filter valid, jadi pakai cara: delete semua via id > 0 tidak bisa, fallback: insert saja (on conflict skip)
+        var r3=await fetch(c.url+'/rest/v1/nac_assignments', {method:'POST', headers:{apikey:c.key, Authorization:'Bearer '+c.key, 'Content-Type':'application/json', Prefer:'resolution=ignore-duplicates'}, body:JSON.stringify(assigns.map(function(a,i){ return {id:'asg-'+i+'-'+a.unit+'-'+(a.auditorId||''), unit:a.unit, auditor_id:a.auditorId||'', tw:a.tw||'TW3'}; }))});
+        if(!r3.ok) throw new Error('nac_assignments: '+await r3.text());
+      }
+      localStorage.setItem('nac_last_upload', String(Date.now()));
+      status('Berhasil upload online bro. HP / bos lo tinggal klik Download Online.');
+    }catch(e){ console.error(e); status('Gagal upload: '+e.message); alert('Gagal upload online bro: '+e.message+'\n\nCek: 1) SQL tabel udah di-Run belum? 2) URL + Key bener? 3) RLS udah allow anon?'); }
+  }
+
+  async function download(){
+    var c=cfg(); if(!c){ alert('Isi dulu Supabase URL + Anon Key di Setting Supabase bro.'); return; }
+    status('Download dari Online...');
+    try{
+      var r1=await fetch(c.url+'/rest/v1/nac_kertas?select=*&limit=5000', {headers:hdr(c)});
+      if(!r1.ok) throw new Error('nac_kertas: '+await r1.text());
+      var krows=await r1.json();
+      var kertas={};
+      krows.forEach(function(r){ kertas[r.id|| (r.unit+'__'+r.komponen)]={asersi:Number(r.asersi||0), verifikasi:Number(r.verifikasi||0)}; });
+      var r2=await fetch(c.url+'/rest/v1/nac_auditors?select=*&limit=1000', {headers:hdr(c)});
+      var arows=r2.ok? await r2.json(): [];
+      var r3=await fetch(c.url+'/rest/v1/nac_assignments?select=*&limit=5000', {headers:hdr(c)});
+      var assigns=[];
+      if(r3.ok){ assigns=(await r3.json()).map(function(r){ return {unit:r.unit, auditorId:r.auditor_id||r.auditorId||'', tw:r.tw||'TW3'}; }); }
+      if(!krows.length && !arows.length && !assigns.length){ status('Online masih kosong bro, upload dulu dari laptop.'); return; }
+      localStorage.setItem('nac_kertas_final_v1', JSON.stringify(kertas));
+      if(arows.length) localStorage.setItem('nac_auditors_final_v1', JSON.stringify(arows.map(function(a){ return {id:a.id, nama:a.nama||'', nip:a.nip||''}; })));
+      if(assigns.length) localStorage.setItem('nac_assignments_final_v1', JSON.stringify(assigns));
+      status('Berhasil download online. Refresh...');
+      setTimeout(function(){ location.reload(); }, 600);
+    }catch(e){ console.error(e); status('Gagal download: '+e.message); alert('Gagal download online bro: '+e.message); }
+  }
+
+  // Tombol Online di pojok kanan bawah (di atas tombol Download Excel)
+  var wrap=document.createElement('div');
+  wrap.style.cssText='position:fixed;bottom:64px;right:20px;z-index:9999;display:flex;gap:8px;flex-direction:column;align-items:flex-end;';
+  var mk=function(txt,bg,fn){
+    var b=document.createElement('button'); b.textContent=txt;
+    b.style.cssText='background:'+bg+';color:#fff;border:none;border-radius:8px;padding:9px 13px;font-size:12px;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,.2);cursor:pointer;';
+    b.onclick=fn; return b;
+  };
+  wrap.appendChild(mk('☁ Upload Online','#059669', upload));
+  wrap.appendChild(mk('⬇ Download Online','#2563eb', download));
+  document.body.appendChild(wrap);
+  window.NAC_UPLOAD=upload; window.NAC_DOWNLOAD=download;
+
+  // Auto-download sekali pas pertama buka, kalau online ada isi & lokal masih kosong
+  setTimeout(async function(){
+    try{
+      var c=cfg(); if(!c) return;
+      var localK=getLocal('nac_kertas_final_v1', {});
+      if(Object.keys(localK).length>0) return; // lokal sudah ada isi, jangan timpa
+      if(sessionStorage.getItem('nac_auto_dl')) return;
+      sessionStorage.setItem('nac_auto_dl','1');
+      var r=await fetch(c.url+'/rest/v1/nac_kertas?select=id&limit=1', {headers:hdr(c)});
+      if(r.ok){ var j=await r.json(); if(j.length){ status('Online ada data, download otomatis...'); await download(); } }
+    }catch(e){}
+  }, 1500);
+
+  // Auto-upload: kalau lokal berubah, upload otomatis 5 detik kemudian (debounce)
+  var lastHash='', timer=null;
+  setInterval(function(){
+    try{
+      var c=cfg(); if(!c) return;
+      var cur=(localStorage.getItem('nac_kertas_final_v1')||'')+(localStorage.getItem('nac_auditors_final_v1')||'')+(localStorage.getItem('nac_assignments_final_v1')||'');
+      if(cur===lastHash) return;
+      lastHash=cur;
+      clearTimeout(timer);
+      timer=setTimeout(function(){ upload(); }, 5000);
+    }catch(e){}
+  }, 2000);
+})();
+</script>
 </html>
